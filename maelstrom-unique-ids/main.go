@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )
@@ -14,13 +15,14 @@ import (
 const (
 	nodeKeyFilePath  = `%s.txt`
 	keyFormat        = `%s-%d`
-	keyBoundInterval = 5
+	keyBoundInterval = 100
 )
 
 type NodeKeyGenerator struct {
 	nodeID        string
 	keyUpperBound int
 	currentKey    int
+	m             sync.Mutex
 }
 
 func NewNodeKeyGenerator(nodeID string) *NodeKeyGenerator {
@@ -33,13 +35,14 @@ func (g *NodeKeyGenerator) Generate() string {
 	if g == nil || g.nodeID == "" {
 		log.Fatal("node ID is not initialized")
 	}
-	log.Printf("node %s: generating key %d", g.nodeID, g.currentKey)
+	g.m.Lock()
 	g.currentKey++
 	if g.currentKey == g.keyUpperBound {
 		if err := g.increaseUpperBound(); err != nil {
 			log.Fatal("failed to increase upper bound")
 		}
 	}
+	g.m.Unlock()
 	return fmt.Sprintf(keyFormat, g.nodeID, g.currentKey)
 }
 
@@ -67,7 +70,6 @@ func (g *NodeKeyGenerator) increaseUpperBound() error {
 	}
 	g.currentKey = currentKey
 	g.keyUpperBound = nextUpperBound
-	log.Printf("node %s: key upper bound increased to %d", g.nodeID, g.keyUpperBound)
 	return nil
 }
 
@@ -86,9 +88,7 @@ func main() {
 		log.Printf("Successfully initialized node %s", body.NodeID)
 
 		generator = NewNodeKeyGenerator(body.NodeID)
-
-		// Let Maelstrom know initialization succeeded by sending the required "init_ok" reply
-		return n.Reply(msg, map[string]string{"type": "init_ok"})
+		return nil
 	})
 
 	n.Handle("generate", func(msg maelstrom.Message) error {
@@ -97,10 +97,10 @@ func main() {
 			return err
 		}
 
-		body["type"] = "generate_ok"
-		body["id"] = generator.Generate()
-
-		return n.Reply(msg, body)
+		return n.Reply(msg, map[string]any{
+			"type": "generate_ok",
+			"id":   generator.Generate(),
+		})
 	})
 	if err := n.Run(); err != nil {
 		log.Fatal(err)
