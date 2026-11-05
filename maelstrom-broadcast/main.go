@@ -11,6 +11,7 @@ import (
 type MessagesStore struct {
 	messages []any
 	m        sync.Mutex
+	topology map[string][]string
 }
 
 func NewMessageStore() *MessagesStore {
@@ -41,7 +42,8 @@ func main() {
 		for _, nodeId := range n.NodeIDs() {
 			if n.ID() != nodeId {
 				n.Send(nodeId, map[string]any{
-					"type": "sync",
+					"type":    "sync",
+					"message": body["message"],
 				})
 			}
 		}
