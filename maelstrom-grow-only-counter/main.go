@@ -12,13 +12,43 @@ const (
 	Counter = "counter"
 )
 
+type msgBody struct {
+	Type  string `json:"type,omitempty"`
+	MsgID int    `json:"msg_id,omitempty"`
+	Delta int    `json:"delta,omitempty"`
+}
+
 func main() {
 	n := maelstrom.NewNode()
 
 	kv := maelstrom.NewSeqKV(n)
 
+	n.Handle("init", func(msg maelstrom.Message) error {
+		// Unmarshal the built-in Maelstrom init body format
+		var body maelstrom.InitMessageBody
+		if err := json.Unmarshal(msg.Body, &body); err != nil {
+			return err
+		}
+
+		_, err := kv.ReadInt(context.Background(), Counter)
+		if err != nil {
+			if maelstrom.ErrorCode(err) == maelstrom.KeyDoesNotExist {
+				err = kv.CompareAndSwap(context.Background(), Counter, 0, 0, true)
+				if err != nil {
+					log.Fatal(err)
+				}
+			} else {
+				log.Fatal(err)
+			}
+		}
+
+		log.Printf("Successfully initialized node %s", body.NodeID)
+
+		return nil
+	})
+
 	n.Handle("add", func(msg maelstrom.Message) error {
-		var body map[string]any
+		var body msgBody
 		if err := json.Unmarshal(msg.Body, &body); err != nil {
 			return err
 		}
@@ -28,8 +58,7 @@ func main() {
 			return err
 		}
 
-		delta, _ := body["delta"].(int)
-		err = kv.CompareAndSwap(context.Background(), Counter, count, delta+count, true)
+		err = kv.CompareAndSwap(context.Background(), Counter, count, body.Delta+count, false)
 		if err != nil {
 			return err
 		}
